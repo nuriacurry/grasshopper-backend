@@ -13,6 +13,26 @@ class Company {
 
     addEmployee(employee) {
         this.employee.push(employee);
-        console.log(`Employee ${employee.name} added to $`)
+        console.log(`Employee ${employee.name} added to ${this.name}`);
+    }
+
+    addDrone(drone) {
+        this.drones.push(drone);
+        console.log(`Drone ${drone.drone_id} added to ${this.name} fleet`);
+    }
+
+    removeDrone(drone_id) {
+        this.drones = this.drones.filter(drone => drone.drone_id !== drone_id);
+        console.log(`Drone ${drone_id} removed from ${this.name} fleet`);
+    }
+
+    viewFleet() {
+        return this.drones;
+    }
+
+    getEmployeeCount() {
+        return this.employees.length;
     }
 }
+
+module.exports = Company;
