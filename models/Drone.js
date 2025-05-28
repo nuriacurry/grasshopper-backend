@@ -1,50 +1,49 @@
+const Container = require('./Container');
+
 class Drone {
-    constructor(drone_id) {
+    constructor(drone_id, container_id, container_capacity = 10.0) {
         this.drone_id = drone_id;
-        this.status = 'Available'; // Available, In-Flight, Maintenance
-        this.current_location = 'Base'; // Current location
+        this.status = 'Available'; 
+        this.current_location = 'Base';
         this.battery_percentage = 100;
         
-        // Containers this drone carries
-        this.containers = [];
+        // Each drone has exactly one container
+        this.container = new Container(container_id, drone_id, container_capacity);
         
         this.last_updated = new Date();
     }
 
-    // Add container to drone
-    addContainer(container) {
-        this.containers.push(container);
-        container.drone_id = this.drone_id;
-        console.log(`Container ${container.container_id} added to drone ${this.drone_id}`);
+    // Check if drone's container is available
+    isAvailable() {
+        return this.status === 'Available' && this.container.status === 'Available';
     }
 
-    // Get available containers
-    getAvailableContainers() {
-        return this.containers.filter(container => 
-            container.status === 'Available' && !container.is_full
-        );
+    // Get remaining capacity of the container
+    getRemainingCapacity() {
+        return this.container.getRemainingCapacity();
+    }
+
+    // Check if this drone can handle an order
+    canHandleOrder(orderWeight, requiresCold) {
+        return this.isAvailable() && this.container.canHandleOrder(orderWeight, requiresCold);
     }
 
     // Start flight
     startFlight() {
         this.status = 'In-Flight';
-        this.containers.forEach(container => {
-            if (container.status === 'Assigned') {
-                container.startTransit();
-            }
-        });
-        console.log(`Drone ${this.drone_id} started flight`);
+        if (this.container.status === 'Assigned') {
+            this.container.startTransit();
+        }
+        console.log(`Drone ${this.drone_id} started flight with container ${this.container.container_id}`);
     }
 
-    // Land and complete deliveries
+    // Land and complete delivery
     land() {
         this.status = 'Available';
-        this.containers.forEach(container => {
-            if (container.status === 'In-Transit') {
-                container.completeDelivery();
-            }
-        });
-        console.log(`Drone ${this.drone_id} landed and completed deliveries`);
+        if (this.container.status === 'In-Transit') {
+            this.container.completeDelivery();
+        }
+        console.log(`Drone ${this.drone_id} landed and completed delivery`);
     }
 }
 
