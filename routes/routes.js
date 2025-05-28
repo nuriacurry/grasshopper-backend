@@ -8,80 +8,93 @@ const Container = require('../models/Container');
 const Drone = require('../models/Drone');
 const Product = require('../models/Product');
 const ContainerAssignmentService = require('../services/ContainerAssignmentService');
+const { DynamicContainerAssignmentService } = require('../services/ContainerAssignmentService');
 
 // Helper function to get available drones from database
 async function getAvailableDrones() {
     try {
+        // Get drones that are available (not assigned to routes)
         const dronesQuery = `
-            SELECT d.drone_id, d.battery_percentage, d.location_id,
-           c.container_id, c.maximum_capacity, c.battery_precentage as container_battery,
-           CASE WHEN c.refrigerated IS NOT NULL THEN true ELSE false END as is_cold
-            FROM drone d
-            JOIN container c ON d.drone_id = c.drone_id
-             WHERE d.route_id IS NULL AND d.battery_percentage > 20 AND c.battery_precentage > 20
+            SELECT drone_id, battery_percentage, location_id
+            FROM drone 
+            WHERE route_id IS NULL AND battery_percentage > 20
+            ORDER BY drone_id
         `;
         
-        const result = await db.query(dronesQuery);
+        const dronesResult = await db.query(dronesQuery);
+        console.log(`Found ${dronesResult.rows.length} available drones`);
         
-        // Convert to your Drone objects
-        const drones = [];
-        result.rows.forEach(row => {
-            const drone = new Drone(row.drone_id, row.container_id, row.maximum_capacity);
-            drone.battery_percentage = row.battery_percentage;
-            drone.current_location = row.location_id;
+        // Get available containers (not assigned to drones)
+        const containersQuery = `
+            SELECT container_id, max_capacity, battery_percentage,
+                   CASE WHEN temperature IS NOT NULL THEN true ELSE false END as is_cold
+            FROM container 
+            WHERE drone_id IS NULL AND battery_percentage > 20
+            ORDER BY max_capacity DESC, container_id
+        `;
+        
+        const containersResult = await db.query(containersQuery);
+        console.log(`Found ${containersResult.rows.length} available containers`);
+        
+        // Create drone objects with assignable containers
+        const availableDrones = [];
+        
+        dronesResult.rows.forEach((droneRow, index) => {
+            // For each drone, assign containers dynamically during order processing
+            // For now, create drone objects that can accept container assignments
+            const drone = new Drone(droneRow.drone_id);
+            drone.battery_percentage = parseFloat(droneRow.battery_percentage);
+            drone.current_location = droneRow.location_id;
+            drone.status = 'Available';
             
-            // Set container properties
-            drone.container.max_weight_capacity = row.maximum_capacity;
-            drone.container.is_cold = row.is_cold;
-            drone.container.is_charged = row.container_battery > 20;
-            drone.container.current_weight = 0; // Start empty for available drones
+            // Store available containers for assignment
+            drone.assignableContainers = containersResult.rows.map(containerRow => ({
+                container_id: containerRow.container_id,
+                max_capacity: parseFloat(containerRow.max_capacity),
+                battery_percentage: parseFloat(containerRow.battery_percentage),
+                is_cold: containerRow.is_cold,
+                is_charged: parseFloat(containerRow.battery_percentage) > 20
+            }));
             
-            drones.push(drone);
+            availableDrones.push(drone);
         });
         
-        return drones;
+        console.log(`Created ${availableDrones.length} assignable drone-container combinations`);
+        return availableDrones;
+        
     } catch (error) {
-        console.error('Error fetching available drones:', error);
+        console.error('Error fetching available drones and containers:', error);
         throw error;
     }
-}
-
-// Helper function to get route status based on Zachary's completion logic
-function getRouteStatus(assignedDroneCount, inFlightCount) {
-    if (assignedDroneCount === 0) {
-        return 'Completed';  // No drones assigned = completed order
-    }
-    
-    if (inFlightCount > 0) {
-        return 'In-Transit';  // Any drone in flight
-    }
-    
-    return 'Processing';  // Drones assigned but not flying yet
 }
 
 // 1. GET /api/routes - Get all routes (customer orders) for dashboard
 router.get('/', async (req, res) => {
     try {
         console.log('GET /api/routes - Fetching all routes from database');
-        
+
         const query = `
-            SELECT r.route_id, r.starting_point, r.ending_point, 
-                   r.departure_time, r.arrival_time,
+            SELECT r.route_id, 
+                   ls.city as starting_city, ls.country as starting_country,
+                   le.city as ending_city, le.country as ending_country,
                    COUNT(d.drone_id) as assigned_drone_count,
-                   COUNT(CASE WHEN d.location_id = '0' THEN 1 END) as in_flight_count,
+                   COUNT(CASE WHEN d.location_id = 0 THEN 1 END) as in_flight_count,
                    ARRAY_AGG(d.drone_id) FILTER (WHERE d.drone_id IS NOT NULL) as drone_ids,
                    ARRAY_AGG(c.container_id) FILTER (WHERE c.container_id IS NOT NULL) as container_ids,
-                   SUM(c.maximum_capacity) as total_capacity,
+                   SUM(c.max_capacity) as total_capacity,
+                   MIN(d.departure_time) as earliest_departure,
+                   MAX(d.arrival_time) as latest_arrival,
                    CASE 
                        WHEN COUNT(d.drone_id) = 0 THEN 'Completed'
-                       WHEN COUNT(CASE WHEN d.location_id = '0' THEN 1 END) > 0 THEN 'In-Transit'
+                       WHEN COUNT(CASE WHEN d.location_id = 0 THEN 1 END) > 0 THEN 'In-Transit'
                        ELSE 'Processing'
                    END as route_status
             FROM route r
+            LEFT JOIN location ls ON r.starting_point = ls.location_id
+            LEFT JOIN location le ON r.ending_point = le.location_id
             LEFT JOIN drone d ON r.route_id = d.route_id
             LEFT JOIN container c ON d.drone_id = c.drone_id
-            GROUP BY r.route_id, r.starting_point, r.ending_point, 
-                     r.departure_time, r.arrival_time
+            GROUP BY r.route_id, ls.city, ls.country, le.city, le.country
             ORDER BY r.route_id DESC
         `;
         
@@ -89,19 +102,18 @@ router.get('/', async (req, res) => {
         
         // Format for frontend dashboard
         const formattedRoutes = result.rows.map(route => ({
-            order_id: route.route_id,  // Using route_id as order_id for frontend compatibility
+            order_id: route.route_id,
             container_status: route.assigned_drone_count > 0 ? 'Container Selected' : 'Container Pending',
             container_id: route.container_ids && route.container_ids.length > 0 ? 
                 route.container_ids.join(', ') : 'N/A',
             order_status: route.route_status === 'Completed' ? 'Delivered' : 'On-Time',
             delivery_status: route.route_status,
-            departure_time: route.departure_time ? 
-                new Date(route.departure_time).toLocaleDateString() + ' ' + 
-                new Date(route.departure_time).toLocaleTimeString() : null,
-            estimated_arrival: route.arrival_time ? 
-                new Date(route.arrival_time).toLocaleDateString() + ' ' + 
-                new Date(route.arrival_time).toLocaleTimeString() : null,
-            delivery_location: route.ending_point,
+            departure_time: route.earliest_departure ? 
+                new Date(route.earliest_departure).toLocaleString() : null,
+            estimated_arrival: route.latest_arrival ? 
+                new Date(route.latest_arrival).toLocaleString() : null,
+            delivery_location: `${route.ending_city}, ${route.ending_country}`,
+            pickup_location: `${route.starting_city}, ${route.starting_country}`,
             drone_count: route.assigned_drone_count || 0,
             total_capacity: route.total_capacity || 0
         }));
@@ -187,12 +199,11 @@ router.post('/', async (req, res) => {
     const client = await db.connect();
     
     try {
-        console.log('POST /api/routes - Creating new route');
+        console.log('POST /api/routes - Creating new route with dynamic container assignment');
         console.log('Request body:', req.body);
         
         await client.query('BEGIN');
         
-        // Validate required fields
         const { products, delivery_location, arrival_time, pickup_location } = req.body;
         
         if (!products || !delivery_location || !arrival_time) {
@@ -203,16 +214,11 @@ router.post('/', async (req, res) => {
             });
         }
 
-        // Convert products to order items for your business logic
-        const orderItems = products.map(productName => ({
-            productName,
-            quantity: 1
-        }));
-
-        // Use your existing Order logic to calculate requirements
+        // Calculate order requirements
+        const orderItems = products.map(productName => ({ productName, quantity: 1 }));
         const tempOrder = new Order(null, orderItems, delivery_location, new Date(arrival_time));
         
-        // Get available drones
+        // Get available drones and containers
         const availableDrones = await getAvailableDrones();
         
         if (availableDrones.length === 0) {
@@ -223,44 +229,45 @@ router.post('/', async (req, res) => {
             });
         }
         
-        // Use your assignment service to determine drone requirements
-        const assignedContainers = ContainerAssignmentService.assignContainersToOrder(tempOrder, availableDrones);
+        // Use dynamic container assignment
+        const assignments = DynamicContainerAssignmentService.assignContainersToOrder(tempOrder, availableDrones);
         
-        if (!assignedContainers) {
+        if (!assignments) {
             await client.query('ROLLBACK');
             return res.status(409).json({
                 success: false,
-                message: 'No suitable drones available for this order',
+                message: 'No suitable drone-container combinations available',
                 required_weight: tempOrder.total_weight,
                 cold_required: tempOrder.requires_cold
             });
         }
 
-        // Create the route
-        const insertRouteQuery = `
-            INSERT INTO route (starting_point, ending_point, departure_time, arrival_time)
-            VALUES ($1, $2, NULL, $3)
-            RETURNING route_id
-        `;
+        // Create route
+        const startLocationQuery = `SELECT location_id FROM location WHERE city ILIKE $1 LIMIT 1`;
+        const endLocationQuery = `SELECT location_id FROM location WHERE city ILIKE $1 LIMIT 1`;
         
-        const routeResult = await client.query(insertRouteQuery, [
-            pickup_location || 'Warehouse',
-            delivery_location,
-            arrival_time
-        ]);
+        const startLocationResult = await client.query(startLocationQuery, [pickup_location || 'Barcelona']);
+        const endLocationResult = await client.query(endLocationQuery, [delivery_location.split(',')[0].trim()]);
         
+        const startLocationId = startLocationResult.rows[0]?.location_id || 1;
+        const endLocationId = endLocationResult.rows[0]?.location_id || 2;
+        
+        const insertRouteQuery = `INSERT INTO route (starting_point, ending_point) VALUES ($1, $2) RETURNING route_id`;
+        const routeResult = await client.query(insertRouteQuery, [startLocationId, endLocationId]);
         const routeId = routeResult.rows[0].route_id;
 
-        // Assign drones to this route
+        // Assign drones to route AND assign containers to drones
         const droneAssignments = [];
-        for (const assignment of assignedContainers) {
-            const updateDroneQuery = `
-                UPDATE drone 
-                SET route_id = $1
-                WHERE drone_id = $2
-            `;
+        for (const assignment of assignments) {
+            // 1. Assign container to drone
+            const assignContainerQuery = `UPDATE container SET drone_id = $1 WHERE container_id = $2`;
+            await client.query(assignContainerQuery, [assignment.drone.drone_id, assignment.container.container_id]);
             
-            await client.query(updateDroneQuery, [routeId, assignment.drone.drone_id]);
+            // 2. Assign drone to route
+            const timeOnly = new Date(arrival_time).toTimeString().split(' ')[0]; // Gets "15:00:00"
+            const updateDroneQuery = `UPDATE drone SET route_id = $1, arrival_time = $2 WHERE drone_id = $3`;
+            await client.query(updateDroneQuery, [routeId, timeOnly, assignment.drone.drone_id]);
+
             
             droneAssignments.push({
                 drone_id: assignment.drone.drone_id,
@@ -272,7 +279,7 @@ router.post('/', async (req, res) => {
 
         await client.query('COMMIT');
         
-        console.log(`Route ${routeId} created with ${droneAssignments.length} drones assigned`);
+        console.log(`Route ${routeId} created with ${droneAssignments.length} drone-container assignments`);
         
         res.status(201).json({
             success: true,
@@ -285,12 +292,12 @@ router.post('/', async (req, res) => {
                 cold_weight: tempOrder.cold_weight,
                 non_cold_weight: tempOrder.non_cold_weight
             },
-            message: 'Route created and drones assigned successfully'
+            message: 'Route created with dynamic container assignments'
         });
         
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('Error creating route:', error);
+        console.error('Error creating route with dynamic assignment:', error);
         res.status(500).json({
             success: false,
             message: 'Failed to create route'

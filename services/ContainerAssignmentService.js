@@ -194,4 +194,99 @@ class ContainerAssignmentService {
     }
 }
 
+class DynamicContainerAssignmentService {
+    static assignContainersToOrder(order, availableDrones) {
+        console.log(`\n DYNAMIC ASSIGNMENT: Finding containers for order ${order.order_id}`);
+        console.log(`Need: ${order.total_weight}kg (${order.cold_weight}kg cold, ${order.non_cold_weight}kg non-cold)`);
+        
+        const assignments = [];
+        let remainingWeight = order.total_weight;
+        let remainingColdWeight = order.cold_weight;
+        
+        // Get all available containers from all drones
+        const allContainers = [];
+        availableDrones.forEach(drone => {
+            drone.assignableContainers.forEach(container => {
+                allContainers.push({
+                    drone: drone,
+                    container: container
+                });
+            });
+        });
+        
+        // Sort containers: cold first (for cold items), then by capacity
+        const coldContainers = allContainers.filter(c => c.container.is_cold).sort((a, b) => b.container.max_capacity - a.container.max_capacity);
+        const standardContainers = allContainers.filter(c => !c.container.is_cold).sort((a, b) => b.container.max_capacity - a.container.max_capacity);
+        
+        console.log(`Available: ${coldContainers.length} cold containers, ${standardContainers.length} standard containers`);
+        
+        // Phase 1: Assign cold items to cold containers
+        if (remainingColdWeight > 0) {
+            console.log(`\n PHASE 1: Assigning ${remainingColdWeight}kg cold items`);
+            
+            for (const containerOption of coldContainers) {
+                if (remainingColdWeight <= 0) break;
+                
+                const capacity = containerOption.container.max_capacity;
+                const weightToAssign = Math.min(remainingColdWeight, capacity);
+                
+                if (weightToAssign > 0) {
+                    assignments.push({
+                        drone: containerOption.drone,
+                        container: containerOption.container,
+                        weight: weightToAssign,
+                        type: 'cold'
+                    });
+                    
+                    remainingColdWeight -= weightToAssign;
+                    remainingWeight -= weightToAssign;
+                    
+                    console.log(`Assigned ${weightToAssign}kg cold items to drone ${containerOption.drone.drone_id}, container ${containerOption.container.container_id}`);
+                    
+                    // Remove this container from available pools
+                    const index = coldContainers.indexOf(containerOption);
+                    coldContainers.splice(index, 1);
+                }
+            }
+        }
+        
+        // Phase 2: Assign remaining items to any available containers
+        if (remainingWeight > 0) {
+            console.log(`\nPHASE 2: Assigning ${remainingWeight}kg remaining items`);
+            
+            const allRemainingContainers = [...coldContainers, ...standardContainers];
+            
+            for (const containerOption of allRemainingContainers) {
+                if (remainingWeight <= 0) break;
+                
+                const capacity = containerOption.container.max_capacity;
+                const weightToAssign = Math.min(remainingWeight, capacity);
+                
+                if (weightToAssign > 0) {
+                    assignments.push({
+                        drone: containerOption.drone,
+                        container: containerOption.container,
+                        weight: weightToAssign,
+                        type: 'standard'
+                    });
+                    
+                    remainingWeight -= weightToAssign;
+                    
+                    console.log(`Assigned ${weightToAssign}kg items to drone ${containerOption.drone.drone_id}, container ${containerOption.container.container_id}`);
+                }
+            }
+        }
+        
+        // Check if fully assigned
+        if (remainingWeight > 0.01) {
+            console.log(`Could not fully assign order. Remaining: ${remainingWeight}kg`);
+            return null;
+        }
+        
+        console.log(`\n Order fully assigned across ${assignments.length} drone-container pairs!`);
+        return assignments;
+    }
+}
+
 module.exports = ContainerAssignmentService;
+module.exports.DynamicContainerAssignmentService = DynamicContainerAssignmentService
