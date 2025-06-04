@@ -31,4 +31,4 @@ process.on('SIGINT', () => {
     });
 });
 
-module.exports = pool;  //
+module.exports = pool;

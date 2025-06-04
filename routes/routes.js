@@ -2,17 +2,14 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 
-// Import models
 const Order = require('../models/Order');
 const Container = require('../models/Container');
 const Drone = require('../models/Drone');
 const Product = require('../models/Product');
 const { ContainerAssignmentService, DynamicContainerAssignmentService, OneContainerPerOrderService } = require('../services/ContainerAssignmentService');
 
-// Helper function to get available drones from database
 async function getAvailableDrones() {
     try {
-        // Get drones that are available (not assigned to routes)
         const dronesQuery = `
             SELECT drone_id, battery_percentage, location_id
             FROM drone 
@@ -21,9 +18,7 @@ async function getAvailableDrones() {
         `;
         
         const dronesResult = await db.query(dronesQuery);
-        console.log(`Found ${dronesResult.rows.length} available drones`);
         
-        // Get available containers (not assigned to drones)
         const containersQuery = `
             SELECT container_id, max_capacity, battery_percentage,
                    CASE WHEN temperature IS NOT NULL THEN true ELSE false END as is_cold
@@ -33,20 +28,15 @@ async function getAvailableDrones() {
         `;
         
         const containersResult = await db.query(containersQuery);
-        console.log(`Found ${containersResult.rows.length} available containers`);
         
-        // Create drone objects with assignable containers
         const availableDrones = [];
         
-        dronesResult.rows.forEach((droneRow, index) => {
-            // For each drone, assign containers dynamically during order processing
-            // For now, create drone objects that can accept container assignments
+        dronesResult.rows.forEach((droneRow) => {
             const drone = new Drone(droneRow.drone_id);
             drone.battery_percentage = parseFloat(droneRow.battery_percentage);
             drone.current_location = droneRow.location_id;
             drone.status = 'Available';
             
-            // Store available containers for assignment
             drone.assignableContainers = containersResult.rows.map(containerRow => ({
                 container_id: containerRow.container_id,
                 max_capacity: parseFloat(containerRow.max_capacity),
@@ -58,7 +48,6 @@ async function getAvailableDrones() {
             availableDrones.push(drone);
         });
         
-        console.log(`Created ${availableDrones.length} assignable drone-container combinations`);
         return availableDrones;
         
     } catch (error) {
@@ -67,11 +56,9 @@ async function getAvailableDrones() {
     }
 }
 
-// 1. GET /api/routes - Get all routes (customer orders) for dashboard
+// GET /api/routes - Get all routes for dashboard
 router.get('/', async (req, res) => {
     try {
-        console.log('GET /api/routes - Fetching all routes from database');
-
         const query = `
             SELECT r.route_id, 
                    ls.city as starting_city, ls.country as starting_country,
@@ -99,7 +86,6 @@ router.get('/', async (req, res) => {
         
         const result = await db.query(query);
         
-        // Format for frontend dashboard
         const formattedRoutes = result.rows.map(route => ({
             order_id: route.route_id,
             container_status: route.assigned_drone_count > 0 ? 'Container Selected' : 'Container Pending',
@@ -132,11 +118,10 @@ router.get('/', async (req, res) => {
     }
 });
 
-// 2. GET /api/routes/:id - Get specific route
+// GET /api/routes/:id - Get specific route
 router.get('/:id', async (req, res) => {
     try {
         const routeId = req.params.id;
-        console.log(`GET /api/routes/${routeId} - Fetching specific route`);
         
         const query = `
             SELECT r.*, 
@@ -193,14 +178,11 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// 3. POST /api/routes - Create new route (customer order)
+// POST /api/routes - Create new route
 router.post('/', async (req, res) => {
     const client = await db.connect();
     
     try {
-        console.log('POST /api/routes - Creating new route with dynamic container assignment');
-        console.log('Request body:', req.body);
-        
         await client.query('BEGIN');
         
         const { products, delivery_location, arrival_time, pickup_location } = req.body;
@@ -213,27 +195,120 @@ router.post('/', async (req, res) => {
             });
         }
 
-        const orderItems = products.map(productName => ({
-            productName,
-            quantity: 1
-        }));
+        // Validate products against database
+        const orderItems = [];
+        let totalWeight = 0;
+        let requiresCold = false;
+        const invalidProducts = [];
 
+        for (const productData of products) {
+            const productName = typeof productData === 'string' ? productData : productData.name;
+            const quantity = typeof productData === 'string' ? 1 : (productData.quantity || 1);
 
-        // Calculate order requirements
-       const orderValidation = Order.validateOrderItems(orderItems);
-        if (!orderValidation.valid) {
+            if (quantity <= 0) {
+                invalidProducts.push(`${productName} (invalid quantity: ${quantity})`);
+                continue;
+            }
+
+            try {
+                const productQuery = `
+                    SELECT product_id, product_name, product_weight,
+                           CASE 
+                               WHEN minimum_temperature IS NOT NULL OR maximum_temperature IS NOT NULL 
+                               THEN true 
+                               ELSE false 
+                           END as requires_cold
+                    FROM product
+                    WHERE LOWER(product_name) = LOWER($1)
+                    LIMIT 1
+                `;
+                
+                const productResult = await client.query(productQuery, [productName]);
+                
+                if (productResult.rows.length === 0) {
+                    // Try fallback to mock products
+                    const Product = require('../models/Product');
+                    const mockProduct = Product.getProductByName(productName);
+                    
+                    if (!mockProduct) {
+                        invalidProducts.push(productName);
+                        continue;
+                    }
+                    
+                    // Use mock product
+                    const itemTotalWeight = mockProduct.unit_weight * quantity;
+                    orderItems.push({
+                        productName: mockProduct.name,
+                        quantity: quantity,
+                        unitWeight: mockProduct.unit_weight,
+                        totalWeight: itemTotalWeight,
+                        requiresCold: mockProduct.requires_cold
+                    });
+                    totalWeight += itemTotalWeight;
+                    if (mockProduct.requires_cold) requiresCold = true;
+                } else {
+                    // Use database product data
+                    const dbProduct = productResult.rows[0];
+                    const unitWeight = parseFloat(dbProduct.product_weight);
+                    const itemTotalWeight = unitWeight * quantity;
+                    
+                    orderItems.push({
+                        productName: dbProduct.product_name,
+                        quantity: quantity,
+                        unitWeight: unitWeight,
+                        totalWeight: itemTotalWeight,
+                        requiresCold: dbProduct.requires_cold
+                    });
+                    totalWeight += itemTotalWeight;
+                    if (dbProduct.requires_cold) requiresCold = true;
+                }
+            } catch (error) {
+                console.error('Error validating product:', productName, error);
+                invalidProducts.push(productName);
+            }
+        }
+
+        // Check for invalid products
+        if (invalidProducts.length > 0) {
             await client.query('ROLLBACK');
             return res.status(400).json({
                 success: false,
-                message: orderValidation.message || orderValidation.error,
-                error_type: orderValidation.error,
-                details: orderValidation.details || {}
+                message: `Invalid products: ${invalidProducts.join(', ')}`,
+                error_type: 'INVALID_PRODUCTS',
+                details: { invalidProducts }
             });
         }
-        
-        const tempOrder = new Order(null, orderItems, delivery_location, new Date(arrival_time));
-        
-        // Get available drones and containers
+
+        // Check for mixed temperature orders
+        const coldItems = orderItems.filter(item => item.requiresCold);
+        const nonColdItems = orderItems.filter(item => !item.requiresCold);
+
+        if (coldItems.length > 0 && nonColdItems.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: "Orders cannot contain both cold and non-cold items. Please place separate orders.",
+                error_type: "MIXED_ORDER_NOT_ALLOWED",
+                details: {
+                    coldItems: coldItems.map(item => `${item.productName} (${item.quantity}x)`),
+                    nonColdItems: nonColdItems.map(item => `${item.productName} (${item.quantity}x)`),
+                    suggestion: "Create one order for cold items and another for non-cold items"
+                }
+            });
+        }
+
+        // Create order object with validated data
+        const tempOrder = {
+            total_weight: Math.round(totalWeight * 100) / 100,
+            requires_cold: requiresCold,
+            cold_weight: Math.round(coldItems.reduce((sum, item) => sum + item.totalWeight, 0) * 100) / 100,
+            non_cold_weight: Math.round(nonColdItems.reduce((sum, item) => sum + item.totalWeight, 0) * 100) / 100,
+            order_items: orderItems // Store the detailed items
+        };
+
+        console.log(`Order breakdown: Total: ${tempOrder.total_weight}kg, Cold: ${tempOrder.cold_weight}kg, Non-cold: ${tempOrder.non_cold_weight}kg`);
+        console.log(`Items: ${orderItems.map(item => `${item.productName} (${item.quantity}x ${item.unitWeight}kg each)`).join(', ')}`);
+
         const availableDrones = await getAvailableDrones();
         
         if (availableDrones.length === 0) {
@@ -244,21 +319,28 @@ router.post('/', async (req, res) => {
             });
         }
         
-        // Use container assignment
         const assignments = OneContainerPerOrderService.assignContainerToOrder(tempOrder, availableDrones);
         
         if (!assignments) {
+            const rejectionReason = OneContainerPerOrderService.getOrderRejectionReason(tempOrder, availableDrones);
+            
             await client.query('ROLLBACK');
             return res.status(409).json({
                 success: false,
-                message: 'No suitable drone-container combinations available',
-                required_weight: tempOrder.total_weight,
-                cold_required: tempOrder.requires_cold
+                message: rejectionReason.message,
+                error_type: rejectionReason.error,
+                details: {
+                    ...rejectionReason.details,
+                    orderItems: orderItems.map(item => ({
+                        product: item.productName,
+                        quantity: item.quantity,
+                        totalWeight: `${item.totalWeight}kg`
+                    }))
+                }
             });
         }
 
-        // Create route
-        // Get start and end location IDs
+        // Get location IDs
         const startLocationQuery = `SELECT location_id FROM location WHERE city ILIKE $1 LIMIT 1`;
         const endLocationQuery = `SELECT location_id FROM location WHERE city ILIKE $1 LIMIT 1`;
 
@@ -268,7 +350,7 @@ router.post('/', async (req, res) => {
         const startLocationId = startLocationResult.rows[0]?.location_id || 1;
         const endLocationId = endLocationResult.rows[0]?.location_id || 2;
 
-        // STEP 1: Check if route already exists for this path
+        // Check for existing route
         const existingRouteQuery = `
             SELECT route_id 
             FROM route 
@@ -277,15 +359,12 @@ router.post('/', async (req, res) => {
         `;
 
         const existingRouteResult = await client.query(existingRouteQuery, [startLocationId, endLocationId]);
-
         let routeId;
 
         if (existingRouteResult.rows.length > 0) {
-            // REUSE existing route
             routeId = existingRouteResult.rows[0].route_id;
             console.log(`Reusing existing route ${routeId} for path ${startLocationId} → ${endLocationId}`);
         } else {
-            // CREATE new route only if path doesn't exist
             const insertRouteQuery = `
                 INSERT INTO route (starting_point, ending_point)
                 VALUES ($1, $2)
@@ -294,19 +373,16 @@ router.post('/', async (req, res) => {
             
             const routeResult = await client.query(insertRouteQuery, [startLocationId, endLocationId]);
             routeId = routeResult.rows[0].route_id;
-            console.log(`Created new route ${routeId} for path ${startLocationId} → ${endLocationId}`);
         }
 
-        // STEP 2: Assign drones to the route
-        const timeOnly = new Date(arrival_time).toTimeString().split(' ')[0]; // Gets "15:00:00"
-
+        // Assign containers and drones
+        const timeOnly = new Date(arrival_time).toTimeString().split(' ')[0];
         const droneAssignments = [];
+        
         for (const assignment of assignments) {
-            // 1. Assign container to drone
             const assignContainerQuery = `UPDATE container SET drone_id = $1 WHERE container_id = $2`;
             await client.query(assignContainerQuery, [assignment.drone.drone_id, assignment.container.container_id]);
             
-            // 2. Assign drone to route (reused or new)
             const updateDroneQuery = `UPDATE drone SET route_id = $1, arrival_time = $2 WHERE drone_id = $3`;
             await client.query(updateDroneQuery, [routeId, timeOnly, assignment.drone.drone_id]);
             
@@ -318,29 +394,29 @@ router.post('/', async (req, res) => {
             });
         }
 
-        console.log(`Order assigned to route ${routeId} with ${droneAssignments.length} drone(s)`);
+        await client.query('COMMIT');
 
         res.status(201).json({
             success: true,
             data: {
                 route_id: routeId,
-                route_reused: existingRouteResult.rows.length > 0, // Tell frontend if route was reused
+                route_reused: existingRouteResult.rows.length > 0,
                 drone_assignments: droneAssignments,
                 delivery_status: 'Processing',
                 total_weight: tempOrder.total_weight,
                 drone_count: droneAssignments.length,
                 cold_weight: tempOrder.cold_weight,
-                non_cold_weight: tempOrder.non_cold_weight
+                non_cold_weight: tempOrder.non_cold_weight,
+                order_items: orderItems
             },
             message: existingRouteResult.rows.length > 0 ? 
                 `Order assigned to existing route ${routeId}` : 
-                `New route ${routeId} created with assignments`
+                `New route ${routeId} created`
         });
-
         
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('Error creating route with dynamic assignment:', error);
+        console.error('Error creating route:', error);
         res.status(500).json({
             success: false,
             message: 'Failed to create route'
@@ -350,13 +426,11 @@ router.post('/', async (req, res) => {
     }
 });
 
-// 4. PUT /api/routes/:id - Update existing route
+// PUT /api/routes/:id - Update route
 router.put('/:id', async (req, res) => {
     try {
         const routeId = req.params.id;
-        console.log(`PUT /api/routes/${routeId} - Updating route`);
         
-        // Check if route exists and no drones are in flight
         const checkQuery = `
             SELECT r.route_id, 
                    COUNT(d.drone_id) as assigned_drone_count,
@@ -377,7 +451,6 @@ router.put('/:id', async (req, res) => {
         
         const routeData = checkResult.rows[0];
         
-        // Cannot modify completed routes (no drones assigned)
         if (routeData.assigned_drone_count === 0) {
             return res.status(400).json({
                 success: false,
@@ -385,7 +458,6 @@ router.put('/:id', async (req, res) => {
             });
         }
         
-        // Cannot modify routes with drones in flight
         if (routeData.in_flight_count > 0) {
             return res.status(400).json({
                 success: false,
@@ -395,7 +467,6 @@ router.put('/:id', async (req, res) => {
         
         const { delivery_location, arrival_time } = req.body;
         
-        // Build update query
         const updates = [];
         const values = [];
         let paramCount = 1;
@@ -430,8 +501,6 @@ router.put('/:id', async (req, res) => {
         
         const result = await db.query(updateQuery, values);
         
-        console.log(`Route ${routeId} updated successfully`);
-        
         res.json({
             success: true,
             data: result.rows[0],
@@ -447,17 +516,14 @@ router.put('/:id', async (req, res) => {
     }
 });
 
-// 5. DELETE /api/routes/:id - Cancel route
+// DELETE /api/routes/:id - Cancel route
 router.delete('/:id', async (req, res) => {
     const client = await db.connect();
     
     try {
         const routeId = req.params.id;
-        console.log(`DELETE /api/routes/${routeId} - Cancelling route`);
-        
         await client.query('BEGIN');
         
-        // Check route status
         const checkQuery = `
             SELECT COUNT(d.drone_id) as assigned_drone_count,
                    COUNT(CASE WHEN d.location_id = '0' THEN 1 END) as in_flight_count
@@ -477,7 +543,6 @@ router.delete('/:id', async (req, res) => {
         
         const routeData = checkResult.rows[0];
         
-        // Cannot cancel completed routes
         if (routeData.assigned_drone_count === 0) {
             await client.query('ROLLBACK');
             return res.status(400).json({
@@ -486,7 +551,6 @@ router.delete('/:id', async (req, res) => {
             });
         }
         
-        // Cannot cancel routes with drones in flight
         if (routeData.in_flight_count > 0) {
             await client.query('ROLLBACK');
             return res.status(400).json({
@@ -495,21 +559,13 @@ router.delete('/:id', async (req, res) => {
             });
         }
         
-        // Free up drones (set route_id to NULL)
-        const freeDronesQuery = `
-            UPDATE drone 
-            SET route_id = NULL
-            WHERE route_id = $1
-        `;
+        const freeDronesQuery = `UPDATE drone SET route_id = NULL WHERE route_id = $1`;
         const freeResult = await client.query(freeDronesQuery, [routeId]);
         
-        // Delete the route
         const deleteRouteQuery = 'DELETE FROM route WHERE route_id = $1';
         await client.query(deleteRouteQuery, [routeId]);
         
         await client.query('COMMIT');
-        
-        console.log(`Route ${routeId} cancelled and ${freeResult.rowCount} drones freed`);
         
         res.json({
             success: true,
@@ -532,17 +588,14 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-// 6. POST /api/routes/:id/start - Start route (drones take off)
+// POST /api/routes/:id/start - Start route
 router.post('/:id/start', async (req, res) => {
     const client = await db.connect();
     
     try {
         const routeId = req.params.id;
-        console.log(`POST /api/routes/${routeId}/start - Starting route`);
-        
         await client.query('BEGIN');
         
-        // Check if route has assigned drones and none are in flight
         const checkQuery = `
             SELECT COUNT(d.drone_id) as assigned_drone_count,
                    COUNT(CASE WHEN d.location_id = '0' THEN 1 END) as in_flight_count
@@ -567,25 +620,13 @@ router.post('/:id/start', async (req, res) => {
             });
         }
         
-        // Update route departure time
-        const updateRouteQuery = `
-            UPDATE route 
-            SET departure_time = NOW()
-            WHERE route_id = $1
-        `;
+        const updateRouteQuery = `UPDATE route SET departure_time = NOW() WHERE route_id = $1`;
         await client.query(updateRouteQuery, [routeId]);
         
-        // Set all assigned drones to in-flight (location_id = '0')
-        const startDronesQuery = `
-            UPDATE drone 
-            SET location_id = '0'
-            WHERE route_id = $1
-        `;
+        const startDronesQuery = `UPDATE drone SET location_id = '0' WHERE route_id = $1`;
         const droneResult = await client.query(startDronesQuery, [routeId]);
         
         await client.query('COMMIT');
-        
-        console.log(`Route ${routeId} started with ${droneResult.rowCount} drones launched`);
         
         res.json({
             success: true,
@@ -595,7 +636,7 @@ router.post('/:id/start', async (req, res) => {
                 drones_launched: droneResult.rowCount,
                 departure_time: new Date()
             },
-            message: 'Route started - drones launched successfully'
+            message: 'Route started successfully'
         });
         
     } catch (error) {
@@ -610,17 +651,14 @@ router.post('/:id/start', async (req, res) => {
     }
 });
 
-// 7. POST /api/routes/:id/complete - Complete route (mark drones as delivered)
+// POST /api/routes/:id/complete - Complete route
 router.post('/:id/complete', async (req, res) => {
     const client = await db.connect();
     
     try {
         const routeId = req.params.id;
-        console.log(`POST /api/routes/${routeId}/complete - Completing route`);
-        
         await client.query('BEGIN');
         
-        // Check if route has drones in flight
         const checkQuery = `
             SELECT COUNT(CASE WHEN d.location_id = '0' THEN 1 END) as in_flight_count,
                    COUNT(d.drone_id) as assigned_drone_count
@@ -637,7 +675,6 @@ router.post('/:id/complete', async (req, res) => {
             });
         }
         
-        // Complete the delivery - free up all drones (set route_id = NULL)
         const completeDronesQuery = `
             UPDATE drone 
             SET route_id = NULL, location_id = 1
@@ -647,8 +684,6 @@ router.post('/:id/complete', async (req, res) => {
         
         await client.query('COMMIT');
         
-        console.log(`Route ${routeId} completed - ${completeResult.rowCount} drones freed and returned to base`);
-        
         res.json({
             success: true,
             data: {
@@ -656,7 +691,7 @@ router.post('/:id/complete', async (req, res) => {
                 delivery_status: 'Completed',
                 drones_freed: completeResult.rowCount
             },
-            message: 'Route completed successfully - drones returned to base'
+            message: 'Route completed successfully'
         });
         
     } catch (error) {

@@ -5,7 +5,6 @@ class Product {
         this.unit_weight = unit_weight; // Weight per individual unit in kg
         this.requires_cold = requires_cold;
         this.description = description;
-        this.category = 'General';
     }
 
     static getMockProducts() {
@@ -28,9 +27,7 @@ class Product {
         return products.find(product => product.name === name);
     }
 
-    // Updated to handle quantities
     static calculateOrderRequirements(orderItems) {
-        // orderItems format: [{ productName: 'Medical Supplies', quantity: 2 }, ...]
         const products = this.getMockProducts();
         let totalWeight = 0;
         let requiresCold = false;
@@ -59,12 +56,6 @@ class Product {
             itemDetails,
             productCount: orderItems.length 
         };
-    }
-
-    // Legacy method for backward compatibility (single quantity assumed)
-    static calculateTotalWeight(productNames) {
-        const orderItems = productNames.map(name => ({ productName: name, quantity: 1 }));
-        return this.calculateOrderRequirements(orderItems);
     }
 }
 
