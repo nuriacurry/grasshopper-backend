@@ -48,7 +48,7 @@ app.get('/api/test', (req, res) => {
 
 app.get('/api/inspect', async (req, res) => {
     try {
-        console.log('🔍 Inspecting database schema...');
+        console.log('Inspecting database schema...');
         
         // Get all tables
         const tablesQuery = `
@@ -59,7 +59,7 @@ app.get('/api/inspect', async (req, res) => {
         `;
         
         const tables = await db.query(tablesQuery);
-        console.log('📋 Available tables:', tables.rows.map(r => r.table_name));
+        console.log('Available tables:', tables.rows.map(r => r.table_name));
         
         const schemaInfo = {};
         
@@ -77,7 +77,7 @@ app.get('/api/inspect', async (req, res) => {
             const columns = await db.query(columnsQuery, [tableName]);
             schemaInfo[tableName] = columns.rows;
             
-            console.log(`📊 Table "${tableName}":`, columns.rows.map(c => `${c.column_name} (${c.data_type})`));
+            console.log(`Table "${tableName}":`, columns.rows.map(c => `${c.column_name} (${c.data_type})`));
         }
         
         res.json({
@@ -99,7 +99,7 @@ app.get('/api/inspect', async (req, res) => {
 
 app.get('/api/fleet-status', async (req, res) => {
     try {
-        console.log('🚁 Checking fleet status...');
+        console.log('Checking fleet status...');
         
         // Check all drones
         const dronesQuery = `

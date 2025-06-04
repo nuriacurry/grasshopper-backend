@@ -15,80 +15,92 @@ class Order {
         this.requires_cold = requirements.requiresCold;
         this.item_details = requirements.itemDetails;
         
-        // NEW: Separate cold and non-cold weights for mixed assignment
-        this.cold_weight = Math.round(requirements.itemDetails
-            .filter(item => item.requiresCold)
-            .reduce((sum, item) => sum + item.totalWeight, 0) * 100) / 100;
-        this.non_cold_weight = Math.round((this.total_weight - this.cold_weight) * 100) / 100;
+        this.cold_weight = this.calculateColdWeight();
+        this.non_cold_weight = this.calculateNonColdWeight();
+
+        const mixedOrderError = this.validateOrderTypes();
+        if (mixedOrderError) {
+            throw new Error(mixedOrderError);
+        }
         
         // Status tracking
         this.order_status = 'On-Time'; // On-Time, Delayed, Delivered
         this.delivery_status = 'Processing'; // Processing, In-Transit, Delivered
         this.container_status = 'Container Pending'; // Container Pending, Container Selected
         
-        // Assigned resources (can be multiple containers now!)
-        this.assigned_containers = []; // Array of {container_id, drone_id, weight_allocated, item_type}
-        this.drone_ids = []; // Multiple drones if needed
-        
         this.created_at = new Date();
         
-        console.log(`📦 Order breakdown: Total: ${this.total_weight}kg, Cold: ${this.cold_weight}kg, Non-cold: ${this.non_cold_weight}kg`);
+        console.log(`Order breakdown: Total: ${this.total_weight}kg, Cold: ${this.cold_weight}kg, Non-cold: ${this.non_cold_weight}kg`);
     }
 
-    // Assign container to order (can be called multiple times)
-    assignContainer(container, weightToAllocate, itemType = 'mixed') {
-        const assignment = {
-            container_id: container.container_id,
-            drone_id: container.drone_id,
-            weight_allocated: Math.round(weightToAllocate * 100) / 100, // Fix floating point
-            item_type: itemType // 'cold', 'non-cold', or 'mixed'
-        };
-        
-        this.assigned_containers.push(assignment);
-        
-        // Track unique drones
-        if (!this.drone_ids.includes(container.drone_id)) {
-            this.drone_ids.push(container.drone_id);
+    calculateColdWeight() {
+        if (!this.item_details || this.item_details.length === 0) {
+            return 0;
         }
+
+        const coldWeight = this.item_details
+            .filter(item => item.requiresCold)
+            .reduce((sum,item) => sum + item.totalWeight, 0);
         
-        // Update status
-        const totalAllocated = Math.round(this.assigned_containers.reduce((sum, c) => sum + c.weight_allocated, 0) * 100) / 100;
-        if (totalAllocated >= this.total_weight) {
-            this.container_status = 'Container Selected';
-        } else {
-            this.container_status = 'Partial Assignment';
+        return Math.round(coldWeight * 100) / 100; // Round to 2 decimals
+    }
+
+    calculateNonColdWeight() {
+        if (!this.item_details || this.item_details_length === 0) {
+            return 0;
         }
+
+        const nonColdWeight = this.item_details 
+            .filter(item => !item.requiresCold)
+            .reduce((sum, item) => sum + item.totalWeight, 0)
         
-        container.assignToOrder(this.order_id, assignment.weight_allocated);
-        console.log(`Container ${container.container_id} assigned ${assignment.weight_allocated}kg (${itemType}) to order ${this.order_id}`);
+        return Math.round(nonColdWeight * 100) / 100; // Round to 2 decimals
     }
 
-    // Check if order is fully allocated to containers
-    isFullyAllocated() {
-        const totalAllocated = Math.round(this.assigned_containers.reduce((sum, c) => sum + c.weight_allocated, 0) * 100) / 100;
-        return totalAllocated >= this.total_weight;
+    validateOrderTypes() {
+        if (!this.item_details || this.item_details.length === 0) {
+            return null; // No items to validate
+        }
+
+        const coldItems = this.item_details.filter(item => item.requiresCold);
+        const nonColdItems = this.item_details.filter(item => !item.requiresCold);
+
+        // Check if we have both cold and non-cold items (MIXED ORDER - NOT ALLOWED)
+        if (coldItems.length > 0 && nonColdItems.length > 0) {
+            const coldItemNames = coldItems.map(item => item.productName).join(', ');
+            const nonColdItemNames = nonColdItems.map(item => item.productName).join(', ');
+            
+            return `Mixed temperature orders not allowed. Cold items: ${coldItemNames}. Non-cold items: ${nonColdItemNames}. Please place separate orders for cold and non-cold items.`;
+        }
+
+        return null; // Order is valid (all cold OR all non-cold)
     }
 
-    // Get remaining weight to allocate
-    getRemainingWeight() {
-        const totalAllocated = Math.round(this.assigned_containers.reduce((sum, c) => sum + c.weight_allocated, 0) * 100) / 100;
-        return Math.round(Math.max(0, this.total_weight - totalAllocated) * 100) / 100;
-    }
+    static validateOrderItems(order_items) {
+        const requirements = Product.calculateOrderRequirements(order_items);
+        
+        if (!requirements.itemDetails || requirements.itemDetails.length === 0) {
+            return { valid: false, error: "No valid products found in order" };
+        }
 
-    // Get remaining cold weight to allocate
-    getRemainingColdWeight() {
-        const coldAllocated = Math.round(this.assigned_containers
-            .filter(c => c.item_type === 'cold' || c.item_type === 'mixed')
-            .reduce((sum, c) => sum + c.weight_allocated, 0) * 100) / 100;
-        return Math.round(Math.max(0, this.cold_weight - coldAllocated) * 100) / 100;
-    }
+        const coldItems = requirements.itemDetails.filter(item => item.requiresCold);
+        const nonColdItems = requirements.itemDetails.filter(item => !item.requiresCold);
 
-    // Get remaining non-cold weight to allocate
-    getRemainingNonColdWeight() {
-        const nonColdAllocated = Math.round(this.assigned_containers
-            .filter(c => c.item_type === 'non-cold' || c.item_type === 'mixed')
-            .reduce((sum, c) => sum + c.weight_allocated, 0) * 100) / 100;
-        return Math.round(Math.max(0, this.non_cold_weight - nonColdAllocated) * 100) / 100;
+        // Check for mixed orders
+        if (coldItems.length > 0 && nonColdItems.length > 0) {
+            return {
+                valid: false,
+                error: "MIXED_ORDER_NOT_ALLOWED",
+                message: "Orders cannot contain both cold and non-cold items. Please place separate orders.",
+                details: {
+                    coldItems: coldItems.map(item => item.productName),
+                    nonColdItems: nonColdItems.map(item => item.productName),
+                    suggestion: "Create one order for cold items and another for non-cold items"
+                }
+            };
+        }
+
+        return { valid: true };
     }
 
     // Start delivery

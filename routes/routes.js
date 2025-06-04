@@ -7,8 +7,7 @@ const Order = require('../models/Order');
 const Container = require('../models/Container');
 const Drone = require('../models/Drone');
 const Product = require('../models/Product');
-const ContainerAssignmentService = require('../services/ContainerAssignmentService');
-const { DynamicContainerAssignmentService } = require('../services/ContainerAssignmentService');
+const { ContainerAssignmentService, DynamicContainerAssignmentService, OneContainerPerOrderService } = require('../services/ContainerAssignmentService');
 
 // Helper function to get available drones from database
 async function getAvailableDrones() {
@@ -214,8 +213,24 @@ router.post('/', async (req, res) => {
             });
         }
 
+        const orderItems = products.map(productName => ({
+            productName,
+            quantity: 1
+        }));
+
+
         // Calculate order requirements
-        const orderItems = products.map(productName => ({ productName, quantity: 1 }));
+       const orderValidation = Order.validateOrderItems(orderItems);
+        if (!orderValidation.valid) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: orderValidation.message || orderValidation.error,
+                error_type: orderValidation.error,
+                details: orderValidation.details || {}
+            });
+        }
+        
         const tempOrder = new Order(null, orderItems, delivery_location, new Date(arrival_time));
         
         // Get available drones and containers
@@ -229,8 +244,8 @@ router.post('/', async (req, res) => {
             });
         }
         
-        // Use dynamic container assignment
-        const assignments = DynamicContainerAssignmentService.assignContainersToOrder(tempOrder, availableDrones);
+        // Use container assignment
+        const assignments = OneContainerPerOrderService.assignContainerToOrder(tempOrder, availableDrones);
         
         if (!assignments) {
             await client.query('ROLLBACK');
@@ -243,31 +258,57 @@ router.post('/', async (req, res) => {
         }
 
         // Create route
+        // Get start and end location IDs
         const startLocationQuery = `SELECT location_id FROM location WHERE city ILIKE $1 LIMIT 1`;
         const endLocationQuery = `SELECT location_id FROM location WHERE city ILIKE $1 LIMIT 1`;
-        
+
         const startLocationResult = await client.query(startLocationQuery, [pickup_location || 'Barcelona']);
         const endLocationResult = await client.query(endLocationQuery, [delivery_location.split(',')[0].trim()]);
-        
+
         const startLocationId = startLocationResult.rows[0]?.location_id || 1;
         const endLocationId = endLocationResult.rows[0]?.location_id || 2;
-        
-        const insertRouteQuery = `INSERT INTO route (starting_point, ending_point) VALUES ($1, $2) RETURNING route_id`;
-        const routeResult = await client.query(insertRouteQuery, [startLocationId, endLocationId]);
-        const routeId = routeResult.rows[0].route_id;
 
-        // Assign drones to route AND assign containers to drones
+        // STEP 1: Check if route already exists for this path
+        const existingRouteQuery = `
+            SELECT route_id 
+            FROM route 
+            WHERE starting_point = $1 AND ending_point = $2 
+            LIMIT 1
+        `;
+
+        const existingRouteResult = await client.query(existingRouteQuery, [startLocationId, endLocationId]);
+
+        let routeId;
+
+        if (existingRouteResult.rows.length > 0) {
+            // REUSE existing route
+            routeId = existingRouteResult.rows[0].route_id;
+            console.log(`Reusing existing route ${routeId} for path ${startLocationId} → ${endLocationId}`);
+        } else {
+            // CREATE new route only if path doesn't exist
+            const insertRouteQuery = `
+                INSERT INTO route (starting_point, ending_point)
+                VALUES ($1, $2)
+                RETURNING route_id
+            `;
+            
+            const routeResult = await client.query(insertRouteQuery, [startLocationId, endLocationId]);
+            routeId = routeResult.rows[0].route_id;
+            console.log(`Created new route ${routeId} for path ${startLocationId} → ${endLocationId}`);
+        }
+
+        // STEP 2: Assign drones to the route
+        const timeOnly = new Date(arrival_time).toTimeString().split(' ')[0]; // Gets "15:00:00"
+
         const droneAssignments = [];
         for (const assignment of assignments) {
             // 1. Assign container to drone
             const assignContainerQuery = `UPDATE container SET drone_id = $1 WHERE container_id = $2`;
             await client.query(assignContainerQuery, [assignment.drone.drone_id, assignment.container.container_id]);
             
-            // 2. Assign drone to route
-            const timeOnly = new Date(arrival_time).toTimeString().split(' ')[0]; // Gets "15:00:00"
+            // 2. Assign drone to route (reused or new)
             const updateDroneQuery = `UPDATE drone SET route_id = $1, arrival_time = $2 WHERE drone_id = $3`;
             await client.query(updateDroneQuery, [routeId, timeOnly, assignment.drone.drone_id]);
-
             
             droneAssignments.push({
                 drone_id: assignment.drone.drone_id,
@@ -277,14 +318,13 @@ router.post('/', async (req, res) => {
             });
         }
 
-        await client.query('COMMIT');
-        
-        console.log(`Route ${routeId} created with ${droneAssignments.length} drone-container assignments`);
-        
+        console.log(`Order assigned to route ${routeId} with ${droneAssignments.length} drone(s)`);
+
         res.status(201).json({
             success: true,
             data: {
                 route_id: routeId,
+                route_reused: existingRouteResult.rows.length > 0, // Tell frontend if route was reused
                 drone_assignments: droneAssignments,
                 delivery_status: 'Processing',
                 total_weight: tempOrder.total_weight,
@@ -292,8 +332,11 @@ router.post('/', async (req, res) => {
                 cold_weight: tempOrder.cold_weight,
                 non_cold_weight: tempOrder.non_cold_weight
             },
-            message: 'Route created with dynamic container assignments'
+            message: existingRouteResult.rows.length > 0 ? 
+                `Order assigned to existing route ${routeId}` : 
+                `New route ${routeId} created with assignments`
         });
+
         
     } catch (error) {
         await client.query('ROLLBACK');
@@ -597,7 +640,7 @@ router.post('/:id/complete', async (req, res) => {
         // Complete the delivery - free up all drones (set route_id = NULL)
         const completeDronesQuery = `
             UPDATE drone 
-            SET route_id = NULL, location_id = 'BASE'
+            SET route_id = NULL, location_id = 1
             WHERE route_id = $1
         `;
         const completeResult = await client.query(completeDronesQuery, [routeId]);

@@ -14,7 +14,7 @@ class Container {
         this.available_weight = max_weight_capacity;    // Remaining capacity
         
         // Assignment
-        this.assigned_order_ids = []; // Can now hold multiple orders!
+        this.assigned_order_ids = []; 
         this.status = 'Available';    // Available, Assigned, In-Transit, Delivered
         
         this.last_updated = new Date();

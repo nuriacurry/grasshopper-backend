@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
             const formattedProducts = result.rows.map(product => ({
                 product_id: product.product_id,
                 name: product.product_name,
-                unit_weight: parseFloat(product.product_weight), // FIXED: product_weight
+                unit_weight: parseFloat(product.product_weight),
                 requires_cold: product.requires_cold,
                 description: `${product.requires_cold ? 'Refrigerated' : 'Standard'} product`,
                 category: product.requires_cold ? 'Refrigerated' : 'Standard'

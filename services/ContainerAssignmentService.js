@@ -288,5 +288,155 @@ class DynamicContainerAssignmentService {
     }
 }
 
+
+class OneContainerPerOrderService {
+    static assignContainerToOrder(order, availableDrones) {
+        console.log(`\nSIMPLE ASSIGNMENT: Finding ONE container for order ${order.order_id}`);
+        console.log(`Need: ${order.total_weight}kg, ${order.requires_cold ? 'COLD' : 'STANDARD'} storage`);
+        
+        const maxContainerCapacity = 350; // kg - from database schema
+        
+        // First check: Order weight validation
+        if (order.total_weight > maxContainerCapacity) {
+            console.log(`Order rejected: ${order.total_weight}kg exceeds max container capacity of ${maxContainerCapacity}kg`);
+            console.log(`Suggestion: Reduce quantity or split into smaller orders`);
+            return null;
+        }
+        
+        // Get available drone-container pairs that match requirements
+        const suitablePairs = [];
+        availableDrones.forEach(drone => {
+            drone.assignableContainers.forEach(container => {
+                // Check temperature requirement AND capacity
+                const temperatureMatch = order.requires_cold ? container.is_cold : true; // Cold orders need cold containers, standard orders can use any
+                const capacityMatch = container.max_capacity >= order.total_weight;
+                const batteryOk = container.is_charged;
+                
+                if (temperatureMatch && capacityMatch && batteryOk) {
+                    suitablePairs.push({
+                        drone: drone,
+                        container: container
+                    });
+                }
+            });
+        });
+        
+        // Check if we found any suitable pairs
+        if (suitablePairs.length === 0) {
+            console.log(`No suitable containers available`);
+            
+            // Provide helpful error messages
+            if (order.requires_cold) {
+                const coldContainers = availableDrones.reduce((count, drone) => 
+                    count + drone.assignableContainers.filter(c => c.is_cold && c.is_charged).length, 0);
+                console.log(`Need cold storage but only ${coldContainers} cold containers available`);
+            } else {
+                const availableContainers = availableDrones.reduce((count, drone) => 
+                    count + drone.assignableContainers.filter(c => c.is_charged).length, 0);
+                console.log(`${availableContainers} containers available but none have ${order.total_weight}kg capacity`);
+            }
+            
+            return null;
+        }
+        
+        // Sort by capacity (largest first) to optimize space usage
+        suitablePairs.sort((a, b) => b.container.max_capacity - a.container.max_capacity);
+        
+        // Select the best container
+        const selectedPair = suitablePairs[0];
+        
+        console.log(`Assigned order to drone ${selectedPair.drone.drone_id}, container ${selectedPair.container.container_id} (${selectedPair.container.max_capacity}kg capacity)`);
+        
+        // Return single assignment
+        return [{
+            drone: selectedPair.drone,
+            container: selectedPair.container,
+            weight: order.total_weight,
+            type: order.requires_cold ? 'cold' : 'standard'
+        }];
+    }
+    
+    // Check if order can be fulfilled
+    static canFulfillOrder(order, availableDrones) {
+        const maxContainerCapacity = 350;
+        
+        // Weight check
+        if (order.total_weight > maxContainerCapacity) {
+            return false;
+        }
+        
+        // Temperature and capacity check
+        let suitableContainers = 0;
+        availableDrones.forEach(drone => {
+            drone.assignableContainers.forEach(container => {
+                const temperatureMatch = order.requires_cold ? container.is_cold : true;
+                const capacityMatch = container.max_capacity >= order.total_weight;
+                const batteryOk = container.is_charged;
+                
+                if (temperatureMatch && capacityMatch && batteryOk) {
+                    suitableContainers++;
+                }
+            });
+        });
+        
+        console.log(`Feasibility check: Order needs ${order.requires_cold ? 'cold' : 'standard'} storage, ${suitableContainers} suitable containers available`);
+        
+        return suitableContainers > 0;
+    }
+    
+    // Get detailed error message for frontend
+    static getOrderRejectionReason(order, availableDrones) {
+        const maxContainerCapacity = 350; //kg
+        
+        if (order.total_weight > maxContainerCapacity) {
+            return {
+                error: 'ORDER_TOO_HEAVY',
+                message: `Order weight (${order.total_weight}kg) exceeds maximum container capacity (${maxContainerCapacity}kg). Please reduce quantity or split into multiple orders.`,
+                details: {
+                    orderWeight: order.total_weight,
+                    maxCapacity: maxContainerCapacity
+                }
+            };
+        }
+        
+        if (order.requires_cold) {
+            const coldContainers = availableDrones.reduce((count, drone) => 
+                count + drone.assignableContainers.filter(c => c.is_cold && c.is_charged && c.max_capacity >= order.total_weight).length, 0);
+            
+            if (coldContainers === 0) {
+                return {
+                    error: 'NO_COLD_STORAGE',
+                    message: 'No refrigerated containers available with sufficient capacity. Cold storage orders require specialized containers.',
+                    details: {
+                        requiresCold: true,
+                        availableColdContainers: coldContainers
+                    }
+                };
+            }
+        }
+        
+        const availableContainers = availableDrones.reduce((count, drone) => 
+            count + drone.assignableContainers.filter(c => c.is_charged && c.max_capacity >= order.total_weight).length, 0);
+        
+        if (availableContainers === 0) {
+            return {
+                error: 'NO_CAPACITY',
+                message: 'All drones are currently assigned to other deliveries. Please try again later or contact support.',
+                details: {
+                    totalDrones: availableDrones.length,
+                    availableContainers: availableContainers
+                }
+            };
+        }
+        
+        return {
+            error: 'UNKNOWN',
+            message: 'Unable to assign container to order. Please contact support.',
+            details: {}
+        };
+    }
+}
+
 module.exports = ContainerAssignmentService;
-module.exports.DynamicContainerAssignmentService = DynamicContainerAssignmentService
+module.exports.DynamicContainerAssignmentService = DynamicContainerAssignmentService;
+module.exports.OneContainerPerOrderService = OneContainerPerOrderService;
