@@ -3,7 +3,17 @@ const router = express.Router();
 const db = require('../config/database');
 const Product = require('../models/Product');
 
-// GET /api/products 
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Retrieves all available products from database with temperature requirements and fallback to mock data.
+ * Formats product data for frontend consumption including weight, cold storage needs, and categorization.
+ * Provides automatic fallback to mock products if database is unavailable to ensure system reliability.
+ * Functions Using This Method: Frontend product dropdown population, order creation interface
+ * Description of Variables:
+ * @param req - Express request object
+ * @param res - Express response object containing formatted products array with id, name, weight, and temperature requirements
+ */
 router.get('/', async (req, res) => {
     try {
         const query = `

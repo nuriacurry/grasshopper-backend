@@ -8,6 +8,16 @@ const Drone = require('../models/Drone');
 const Product = require('../models/Product');
 const { ContainerAssignmentService, DynamicContainerAssignmentService, OneContainerPerOrderService } = require('../services/ContainerAssignmentService');
 
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Retrieves available drones and containers from database for order assignment.
+ * Filters for drones not assigned to routes and containers with sufficient battery.
+ * Creates drone objects with assignable container data for container assignment service.
+ * Functions Using This Method: POST /api/routes (order creation)
+ * Description of Variables:
+ * @returns {Array} Array of drone objects with assignable containers
+ */
 async function getAvailableDrones() {
     try {
         const dronesQuery = `
@@ -56,7 +66,16 @@ async function getAvailableDrones() {
     }
 }
 
-// GET /api/routes - Get all routes for dashboard
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Retrieves all routes with associated drone and container information for dashboard display.
+ * Aggregates route data with location names, drone counts, and delivery status for frontend consumption.
+ * Functions Using This Method: Frontend dashboard API calls
+ * Description of Variables:
+ * @param req - Express request object
+ * @param res - Express response object containing formatted routes array
+ */
 router.get('/', async (req, res) => {
     try {
         const query = `
@@ -118,7 +137,16 @@ router.get('/', async (req, res) => {
     }
 });
 
-// GET /api/routes/:id - Get specific route
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Retrieves detailed information for a specific route including assigned drones and containers.
+ * Returns route data with drone assignments for detailed route management.
+ * Functions Using This Method: Frontend route detail views, route modification interface
+ * Description of Variables:
+ * @param req - Express request object containing route ID parameter
+ * @param res - Express response object containing detailed route information
+ */
 router.get('/:id', async (req, res) => {
     try {
         const routeId = req.params.id;
@@ -178,7 +206,18 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// POST /api/routes - Create new route
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Creates new delivery route with product validation and container assignment.
+ * Validates products against database, checks for mixed temperature orders, calculates weights,
+ * assigns appropriate containers, and creates or reuses routes. Supports both individual products
+ * and quantity-based orders with detailed error handling and transaction management.
+ * Functions Using This Method: Frontend order creation interface
+ * Description of Variables:
+ * @param req - Express request object containing products, delivery_location, arrival_time, pickup_location
+ * @param res - Express response object containing route creation results and assignments
+ */
 router.post('/', async (req, res) => {
     const client = await db.connect();
     
@@ -303,7 +342,7 @@ router.post('/', async (req, res) => {
             requires_cold: requiresCold,
             cold_weight: Math.round(coldItems.reduce((sum, item) => sum + item.totalWeight, 0) * 100) / 100,
             non_cold_weight: Math.round(nonColdItems.reduce((sum, item) => sum + item.totalWeight, 0) * 100) / 100,
-            order_items: orderItems // Store the detailed items
+            order_items: orderItems
         };
 
         console.log(`Order breakdown: Total: ${tempOrder.total_weight}kg, Cold: ${tempOrder.cold_weight}kg, Non-cold: ${tempOrder.non_cold_weight}kg`);
@@ -426,7 +465,16 @@ router.post('/', async (req, res) => {
     }
 });
 
-// PUT /api/routes/:id - Update route
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Updates existing route delivery location and arrival time with validation.
+ * Prevents modification of completed routes or routes with drones in flight for safety.
+ * Functions Using This Method: Frontend route modification interface
+ * Description of Variables:
+ * @param req - Express request object containing route ID and update fields
+ * @param res - Express response object containing update confirmation
+ */
 router.put('/:id', async (req, res) => {
     try {
         const routeId = req.params.id;
@@ -516,7 +564,17 @@ router.put('/:id', async (req, res) => {
     }
 });
 
-// DELETE /api/routes/:id - Cancel route
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Cancels route and frees assigned drones with safety validation.
+ * Prevents cancellation of completed routes or routes with drones in flight.
+ * Uses database transactions to ensure data consistency during cancellation.
+ * Functions Using This Method: Frontend route management interface
+ * Description of Variables:
+ * @param req - Express request object containing route ID to cancel
+ * @param res - Express response object containing cancellation confirmation and freed drone count
+ */
 router.delete('/:id', async (req, res) => {
     const client = await db.connect();
     
@@ -588,7 +646,17 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-// POST /api/routes/:id/start - Start route
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Initiates route execution by launching assigned drones with safety validation.
+ * Sets departure time and updates drone location to in-flight status (location_id = 0).
+ * Prevents starting routes with no drones or routes already in progress.
+ * Functions Using This Method: Frontend route management interface, drone launch operations
+ * Description of Variables:
+ * @param req - Express request object containing route ID to start
+ * @param res - Express response object containing launch confirmation and drone count
+ */
 router.post('/:id/start', async (req, res) => {
     const client = await db.connect();
     
@@ -651,7 +719,17 @@ router.post('/:id/start', async (req, res) => {
     }
 });
 
-// POST /api/routes/:id/complete - Complete route
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Completes route delivery by returning drones to base and freeing resources.
+ * Updates drone status to location_id = 1 (base) and removes route assignment.
+ * Marks delivery as completed and makes drones available for new assignments.
+ * Functions Using This Method: Frontend route management interface, delivery completion operations
+ * Description of Variables:
+ * @param req - Express request object containing route ID to complete
+ * @param res - Express response object containing completion confirmation and freed drone count
+ */
 router.post('/:id/complete', async (req, res) => {
     const client = await db.connect();
     

@@ -1,3 +1,16 @@
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Product model constructor that creates product objects with weight and temperature requirements.
+ * Stores product information including cold storage needs
+ * Functions Using This Method: Mock product generation, product validation systems
+ * Description of Variables:
+ * @param product_id - Unique identifier for the product
+ * @param name - Product name for display and identification
+ * @param unit_weight - Weight per individual unit in kilograms
+ * @param requires_cold - Boolean indicating if product needs cold storage
+ * @param description - Product description for user information
+ */
 class Product {
     constructor(product_id, name, unit_weight, requires_cold = false, description = '') {
         this.product_id = product_id;
@@ -7,6 +20,15 @@ class Product {
         this.description = description;
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Static method that returns array of predefined mock products for testing and fallback scenarios.
+     * Provides product catalog with varied weights and temperature requirements for system testing.
+     * Functions Using This Method: Product validation fallback, order requirement calculations, system testing
+     * Description of Variables:
+     * @returns {Array} Array of Product objects with diverse weight and temperatures
+     */
     static getMockProducts() {
         return [
             new Product('PROD001', 'Medical Supplies', 2.5, true, 'Temperature-sensitive medical equipment'),
@@ -22,11 +44,32 @@ class Product {
         ];
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Static method that searches mock products by name and returns matching product object.
+     * Provides product lookup functionality for order validation when database is unavailable.
+     * Functions Using This Method: Order validation systems, product requirement calculations
+     * Description of Variables:
+     * @param name - Product name to search for in mock products catalog
+     * @returns {Product|undefined} Product object if found, undefined if not found
+     */
     static getProductByName(name) {
         const products = this.getMockProducts();
         return products.find(product => product.name === name);
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Static method that calculates total weight and temperature requirements for order items.
+     * Processes order items with quantities to determine total weight, cold storage needs, and detailed breakdown.
+     * Provides order analysis for container assignment and planning.
+     * Functions Using This Method: Order model constructor, order validation systems, container assignment
+     * Description of Variables:
+     * @param orderItems - Array of objects containing productName and quantity for each item
+     * @returns {Object} Order requirements including totalWeight, requiresCold, itemDetails, and productCount
+     */
     static calculateOrderRequirements(orderItems) {
         const products = this.getMockProducts();
         let totalWeight = 0;

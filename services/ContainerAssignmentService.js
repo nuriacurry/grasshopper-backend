@@ -1,4 +1,22 @@
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Service for assigning single containers to orders based on weight and temperature needs.
+ * Functions Using This Method: Route creation API
+ * Description of Variables: None - static service class
+ */
 class OneContainerPerOrderService {
+    
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Finds and assigns suitable container to order based on weight and temperature.
+     * Functions Using This Method: Route creation API
+     * Description of Variables:
+     * @param order - Order object with weight and temperature requirements
+     * @param availableDrones - Array of drones with assignable containers
+     * @returns {Array|null} Assignment array or null if no suitable container found
+     */
     static assignContainerToOrder(order, availableDrones) {
         const maxContainerCapacity = 350; // kg - from database schema
         
@@ -43,6 +61,16 @@ class OneContainerPerOrderService {
         }];
     }
     
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Checks if order can be fulfilled with available containers.
+     * Functions Using This Method: Order validation systems
+     * Description of Variables:
+     * @param order - Order object to check
+     * @param availableDrones - Array of available drones
+     * @returns {boolean} True if order can be fulfilled
+     */
     static canFulfillOrder(order, availableDrones) {
         const maxContainerCapacity = 350;
         
@@ -66,6 +94,16 @@ class OneContainerPerOrderService {
         return suitableContainers > 0;
     }
     
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Provides detailed error message when order cannot be assigned.
+     * Functions Using This Method: Route creation API error handling
+     * Description of Variables:
+     * @param order - Order that failed assignment
+     * @param availableDrones - Array of available drones
+     * @returns {Object} Error object with type, message, and details
+     */
     static getOrderRejectionReason(order, availableDrones) {
         const maxContainerCapacity = 350;
         

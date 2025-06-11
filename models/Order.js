@@ -1,5 +1,18 @@
 const Product = require('./Product');
 
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Order model constructor that creates order objects with calculated weight requirements and temperature validation.
+ * Automatically calculates total weight, cold/non-cold weight distribution, and sets initial status tracking.
+ * Provides order breakdown logging for monitoring and debugging purposes.
+ * Functions Using This Method: Route creation API, order validation systems
+ * Description of Variables:
+ * @param order_id - Unique identifier for the order
+ * @param order_items - Array of products with quantities for weight calculation
+ * @param delivery_location - Destination address for the order
+ * @param arrival_time - Scheduled delivery time
+ */
 class Order {
     constructor(order_id, order_items, delivery_location, arrival_time) {
         this.order_id = order_id;
@@ -27,6 +40,15 @@ class Order {
         console.log(`Order breakdown: Total: ${this.total_weight}kg, Cold: ${this.cold_weight}kg, Non-cold: ${this.non_cold_weight}kg`);
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Calculates total weight of cold storage items in the order.
+     * Filters item details for cold storage requirements and sums their weights with precision rounding.
+     * Functions Using This Method: Order constructor, container assignment validation
+     * Description of Variables:
+     * @returns {number} Total weight of cold items in kilograms rounded to 2 decimal places
+     */
     calculateColdWeight() {
         if (!this.item_details || this.item_details.length === 0) {
             return 0;
@@ -39,6 +61,15 @@ class Order {
         return Math.round(coldWeight * 100) / 100;
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Calculates total weight of non-cold storage items in the order.
+     * Filters item details for standard temperature items and sums their weights.
+     * Functions Using This Method: Order constructor, container assignment validation
+     * Description of Variables:
+     * @returns {number} Total weight of non-cold items in kilograms rounded to 2 decimal places
+     */
     calculateNonColdWeight() {
         if (!this.item_details || this.item_details.length === 0) {
             return 0;
@@ -51,6 +82,17 @@ class Order {
         return Math.round(nonColdWeight * 100) / 100;
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Static validation method for order items that prevents mixed temperature orders.
+     * Checks for presence of both cold and non-cold items which require separate deliveries.
+     * Provides detailed error information for frontend display and user guidance.
+     * Functions Using This Method: Route creation API, order validation middleware
+     * Description of Variables:
+     * @param order_items - Array of order items to validate for temperature compatibility
+     * @returns {Object} Validation result with success status and detailed error information if invalid
+     */
     static validateOrderItems(order_items) {
         const requirements = Product.calculateOrderRequirements(order_items);
         
@@ -78,26 +120,64 @@ class Order {
         return { valid: true };
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Initiates delivery process by updating order status to in-transit and recording departure time.
+     * Functions Using This Method: Route start API, delivery management system
+     * Description of Variables: None - status update method only
+     */
     startDelivery() {
         this.delivery_status = 'In-Transit';
         this.departure_time = new Date();
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Marks order as successfully delivered by updating both delivery and order status.
+     * Functions Using This Method: Route completion API, delivery management system
+     * Description of Variables: None - status update method only
+     */
     completeDelivery() {
         this.delivery_status = 'Delivered';
         this.order_status = 'Delivered';
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Updates order delivery location and arrival time with fallback to existing values.
+     * Functions Using This Method: Route modification API, order management interface
+     * Description of Variables:
+     * @param newLocation - Updated delivery location or null to keep existing
+     * @param newArrivalTime - Updated arrival time or null to keep existing
+     */
     modifyOrder(newLocation, newArrivalTime) {
         this.delivery_location = newLocation || this.delivery_location;
         this.arrival_time = newArrivalTime || this.arrival_time;
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Cancels order by updating status to cancelled for both order and delivery tracking.
+     * Functions Using This Method: Route cancellation API, order management interface
+     * Description of Variables: None - status update method only
+     */
     cancelOrder() {
         this.order_status = 'Cancelled';
         this.delivery_status = 'Cancelled';
     }
 
+    /***
+     * Method Creation Date: 04/06/2025, Nuria Siddiqa
+     * Most Recent Change: 04/06/2025, Nuria Siddiqa
+     * Method Description: Checks if order is delayed by comparing current time with scheduled arrival time.
+     * Updates order status to delayed if past due and not yet delivered for accurate tracking.
+     * Functions Using This Method: Order monitoring systems, status update processes
+     * Description of Variables: None - status checking method only
+     */
     checkIfDelayed() {
         const now = new Date();
         if (now > new Date(this.arrival_time) && this.delivery_status !== 'Delivered') {

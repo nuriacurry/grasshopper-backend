@@ -2,7 +2,17 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 
-// GET /api/locations
+/***
+ * Method Creation Date: 04/06/2025, Nuria Siddiqa
+ * Most Recent Change: 04/06/2025, Nuria Siddiqa
+ * Method Description: Retrieves all delivery locations from database with formatted address information.
+ * Combines address components into readable format and filters out null values for clean display.
+ * Orders locations by city and street for consistent frontend dropdown presentation.
+ * Functions Using This Method: Frontend location dropdown population, order creation interface
+ * Description of Variables:
+ * @param req - Express request object
+ * @param res - Express response object containing formatted locations array with id, name, address, city, and country
+ */
 router.get('/', async (req, res) => {
     try {
         const query = `
