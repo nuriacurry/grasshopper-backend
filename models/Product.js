@@ -63,7 +63,7 @@ class Product {
      * Method Creation Date: 04/06/2025, Nuria Siddiqa
      * Most Recent Change: 04/06/2025, Nuria Siddiqa
      * Method Description: Static method that calculates total weight and temperature requirements for order items.
-     * Processes order items with quantities to determine total weight, cold storage needs, and detailed breakdown.
+     * Processes order items
      * Provides order analysis for container assignment and planning.
      * Functions Using This Method: Order model constructor, order validation systems, container assignment
      * Description of Variables:

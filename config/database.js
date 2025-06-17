@@ -16,8 +16,8 @@ if (!process.env.DATABASE_URL) {
 /***
  * Method Creation Date: 04/06/2025, Nuria Siddiqa
  * Most Recent Change: 04/06/2025, Nuria Siddiqa
- * Method Description: Creates PostgreSQL connection pool with optimized settings for production.
- * Configures SSL for production environments and sets connection limits and timeouts.
+ * Method Description: Creates PostgreSQL connection pool
+ * Configures SSL and sets connection limits and timeouts.
  * Functions Using This Method: All database operations throughout the application
  * Description of Variables:
  * @param connectionString - Database URL from environment variables
@@ -28,12 +28,13 @@ if (!process.env.DATABASE_URL) {
  */
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: {
+        rejectUnauthorized: process.env.SSL_REJECT_UNAUTHORIZED !== 'false'
+    },
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
 });
-
 /***
  * Method Creation Date: 04/06/2025, Nuria Siddiqa
  * Most Recent Change: 04/06/2025, Nuria Siddiqa
@@ -64,8 +65,8 @@ pool.on('error', (err, client) => {
 /***
  * Method Creation Date: 04/06/2025, Nuria Siddiqa
  * Most Recent Change: 04/06/2025, Nuria Siddiqa
- * Method Description: Graceful shutdown handler for SIGINT signal (Ctrl+C).
- * Closes all database connections properly before exiting to prevent connection leaks.
+ * Method Description: zshutdown handler for SIGINT signal (Ctrl+C).
+ * Closes all database connections properly before exiting
  * Functions Using This Method: Application shutdown process
  * Description of Variables: None - shutdown handler only
  */

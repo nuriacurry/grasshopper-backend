@@ -44,7 +44,7 @@ class Order {
      * Method Creation Date: 04/06/2025, Nuria Siddiqa
      * Most Recent Change: 04/06/2025, Nuria Siddiqa
      * Method Description: Calculates total weight of cold storage items in the order.
-     * Filters item details for cold storage requirements and sums their weights with precision rounding.
+     * Filters item details for cold storage requirements and sums their weights
      * Functions Using This Method: Order constructor, container assignment validation
      * Description of Variables:
      * @returns {number} Total weight of cold items in kilograms rounded to 2 decimal places
@@ -87,7 +87,7 @@ class Order {
      * Most Recent Change: 04/06/2025, Nuria Siddiqa
      * Method Description: Static validation method for order items that prevents mixed temperature orders.
      * Checks for presence of both cold and non-cold items which require separate deliveries.
-     * Provides detailed error information for frontend display and user guidance.
+     * Provides error information for frontend display and user guidance.
      * Functions Using This Method: Route creation API, order validation middleware
      * Description of Variables:
      * @param order_items - Array of order items to validate for temperature compatibility
